@@ -1,11 +1,6 @@
 # Project Veracity
 ### Self-Healing Hallucination Firewall
 
-XEN-O-THON 2026 — Team Leo — GTBIT New Delhi  
-Track: AI & Automation (Beyond Wrappers)
-
----
-
 ## What It Does
 
 Project Veracity is a real-time middleware firewall that sits between a large language model and the user. It intercepts the LLM's streaming output token by token, detects factual claims using entropy-based uncertainty estimation, verifies them against a local ground-truth database, and auto-corrects hallucinations before they reach the screen.
@@ -145,11 +140,3 @@ frontend/veracity-ui/src/
 - Multi-turn conversation with correction memory across turns
 - Exportable correction audit log for enterprise compliance
 - Adaptive entropy threshold calibrated per model and domain
-
----
-
-## Team
-
-Team Leo — XEN-O-THON 2026  
-AI & Automation (Beyond Wrappers)  
-GTBIT New Delhi

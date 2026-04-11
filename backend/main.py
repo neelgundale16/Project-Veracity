@@ -62,6 +62,7 @@ def build_augmented_query(query: str) -> str:
     """
     Pull relevant context from vault and inject it into the prompt
     before sending anything to the LLM.
+    Context is truncated to avoid Ollama OOM crashes on large documents.
     """
     vault_result = vault.search(query)
 
@@ -73,6 +74,12 @@ def build_augmented_query(query: str) -> str:
             f"User query: {query}"
         )
 
+    # Truncate context to prevent Ollama runner OOM on large documents
+    MAX_CONTEXT_CHARS = 800
+    context_text = vault_result.matched_text
+    if len(context_text) > MAX_CONTEXT_CHARS:
+        context_text = context_text[:MAX_CONTEXT_CHARS] + "…"
+
     return (
         "You are Project Veracity, a grounded document-analysis assistant.\n"
         "Use the provided ground-truth vault context as the primary source of truth.\n"
@@ -82,7 +89,7 @@ def build_augmented_query(query: str) -> str:
         "does not contain enough information.\n\n"
         f"User query: {query}\n\n"
         "GROUND-TRUTH CONTEXT:\n"
-        f"{vault_result.matched_text}\n\n"
+        f"{context_text}\n\n"
         f"SOURCE DOCUMENT: {vault_result.source_document}"
     )
 
@@ -98,11 +105,20 @@ async def firewall_generator(query: str) -> AsyncGenerator[str, None]:
         async for raw, claims in stream_and_detect(augmented_query):
 
             if raw.startswith("TOKEN:"):
-                token_text = raw[6:]
+                # Format: TOKEN:<text>:<entropy_bits>
+                parts = raw[6:].rsplit(":", 1)
+                token_text  = parts[0]
+                try:
+                    entropy = float(parts[1])
+                except (IndexError, ValueError):
+                    entropy = 0.0
+
+                from interceptor import ENTROPY_THRESHOLD
+                status = "high-entropy" if entropy > ENTROPY_THRESHOLD else "streaming"
                 token_event = StreamToken(
                     id=str(uuid.uuid4())[:8],
                     text=token_text,
-                    status="streaming"
+                    status=status
                 )
                 yield sse("token", token_event.model_dump())
                 continue
@@ -112,25 +128,24 @@ async def firewall_generator(query: str) -> AsyncGenerator[str, None]:
                 return
 
             if not claims:
+                # No high-entropy tokens → sentence is confident → skip NLI
                 stats.claims_skipped += 1
                 continue
 
+            # Entropy flagged this sentence → send to NLI verification
             stats.total_claims_detected += len(claims)
 
             for claim in claims:
                 t0 = time.perf_counter()
+                # Entropy already pre-screened; no regex filter needed
 
-                if not sentinel.is_fact_seeking(claim.sentence):
-                    stats.claims_skipped += 1
-                    continue
-
-                vault_result = vault.search(claim.text)
+                vault_result = vault.search(claim.sentence)
                 if vault_result is None:
                     stats.claims_verified += 1
                     continue
 
                 nli_result = sentinel.classify(
-                    claim_text=claim.text,
+                    claim_text=claim.sentence,
                     context_text=vault_result.matched_text
                 )
 
@@ -206,8 +221,6 @@ async def vault_upload(
 ):
     filename = source_name or file.filename or "uploaded_document"
     content_type = file.content_type or ""
-<<<<<<< HEAD
-
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file was received. Please attach a file before uploading.")
 
@@ -230,17 +243,6 @@ async def vault_upload(
             reader = pypdf.PdfReader(_io.BytesIO(raw_bytes))
             if len(reader.pages) == 0:
                 raise HTTPException(status_code=400, detail=f"'{filename}' has no pages.")
-=======
-    raw_bytes = await file.read()
-    chunks: list[str] = []
-
-    if "pdf" in content_type or filename.lower().endswith(".pdf"):
-        try:
-            import io
-            from pypdf import PdfReader
-
-            reader = PdfReader(io.BytesIO(raw_bytes))
->>>>>>> b88d840df44c4a067b32a7bec0fcf549dce26d8d
             for page in reader.pages:
                 text = page.extract_text()
                 if text and text.strip():
@@ -253,7 +255,6 @@ async def vault_upload(
                             chunk, chars = [], 0
                     if chunk:
                         chunks.append(" ".join(chunk))
-<<<<<<< HEAD
         except HTTPException:
             raise
         except Exception as e:
@@ -261,13 +262,6 @@ async def vault_upload(
                 status_code=400,
                 detail=f"Could not read '{filename}'. It may be encrypted, corrupted, or a scanned image-only PDF. Error: {e}"
             )
-=======
-        except ImportError:
-            raise HTTPException(status_code=500, detail="Run: pip install pypdf")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"PDF parse error: {e}")
-
->>>>>>> b88d840df44c4a067b32a7bec0fcf549dce26d8d
     else:
         try:
             text = raw_bytes.decode("utf-8")
@@ -281,7 +275,6 @@ async def vault_upload(
             if chunk:
                 chunks.append(" ".join(chunk))
         except UnicodeDecodeError:
-<<<<<<< HEAD
             raise HTTPException(
                 status_code=400,
                 detail=f"'{filename}' could not be decoded. File must be a PDF or a plain UTF-8 text file."
@@ -292,29 +285,16 @@ async def vault_upload(
             status_code=400,
             detail=f"No text could be extracted from '{filename}'. It may be a scanned image PDF with no selectable text."
         )
-=======
-            raise HTTPException(status_code=400, detail="File must be PDF or UTF-8 text")
-
-    if not chunks:
-        raise HTTPException(status_code=400, detail="No text extracted from file")
->>>>>>> b88d840df44c4a067b32a7bec0fcf549dce26d8d
 
     vault.add_documents_bulk(chunks, filename)
     logger.info(f"Uploaded '{filename}' | {len(chunks)} chunks → vault")
 
     return JSONResponse({
-<<<<<<< HEAD
         "status":       "success",
         "filename":     filename,
         "chunks_added": len(chunks),
         "vault_total":  vault.get_count(),
         "message":      f"Successfully loaded {len(chunks)} facts from '{filename}' into the vault."
-=======
-        "status": "success",
-        "filename": filename,
-        "chunks_added": len(chunks),
-        "vault_total": vault.get_count()
->>>>>>> b88d840df44c4a067b32a7bec0fcf549dce26d8d
     })
 
 

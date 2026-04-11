@@ -20,26 +20,9 @@ interface CorrectionEntry {
   diff: number
 }
 
-// ── Data pools ───────────────────────────────────────────────────────────
-const HALLUCINATION_POOL = [
-  { bad: '$89.5B',  good: '$90.8B',  ctx: 'Apple reported ',          src: 'SEC filing vault',     conf: 0.94, diff: 0.82 },
-  { bad: '4.25%',   good: '5.33%',   ctx: 'Federal Funds rate is ',   src: 'Fed reserve vault',    conf: 0.97, diff: 0.91 },
-  { bad: '$38,200', good: '$43,750', ctx: 'Bitcoin closed at ',        src: 'market data vault',    conf: 0.91, diff: 0.78 },
-  { bad: '2.1%',    good: '3.4%',    ctx: 'CPI inflation stands at ', src: 'BLS statistics vault', conf: 0.96, diff: 0.88 },
-  { bad: '$600B',   good: '$780B',   ctx: 'Tesla market cap is ',      src: 'equity data vault',    conf: 0.89, diff: 0.74 },
-  { bad: '170B',    good: 'unknown', ctx: 'GPT-4 has ',                src: 'model registry vault', conf: 0.93, diff: 0.85 },
-]
+const BACKEND_URL = '/api'
 
-const PASS_POOL = [
-  'The S&P 500 index contains 500 large-cap US companies.',
-  'Python supports dynamic typing and garbage collection.',
-  'HTTP 404 indicates the requested resource was not found.',
-  'SHA-256 outputs a fixed 256-bit digest regardless of input size.',
-  'OpenAI was incorporated in December 2015.',
-  'The TCP/IP model has four abstraction layers.',
-]
-
-const PROVIDERS = ['Gemini', 'OpenAI', 'Claude', 'Mistral']
+const PROVIDERS = ['Ollama (llama3)', 'Gemini', 'OpenAI', 'Claude']
 
 let uid = 1
 
@@ -220,7 +203,7 @@ function FileButton({
 // ── Main ─────────────────────────────────────────────────────────────────
 export default function DemoPage() {
   const [tab, setTab]                       = useState<'firewall' | 'evaluate'>('firewall')
-  const [provider, setProvider]             = useState('Gemini')
+  const [provider, setProvider]             = useState('Ollama (llama3)')
   const [running, setRunning]               = useState(false)
   const [query, setQuery]                   = useState('')
   const [tokens, setTokens]                 = useState<TokenSpan[]>([])
@@ -228,53 +211,18 @@ export default function DemoPage() {
   const [claimsFound, setClaimsFound]       = useState(0)
   const [verified, setVerified]             = useState(0)
   const [hallucinations, setHallucinations] = useState(0)
-  const [avgVerify, setAvgVerify]           = useState(143)
-  const [pipeline, setPipeline]             = useState(312)
+  const [avgVerify, setAvgVerify]           = useState(0)
+  const [pipeline, setPipeline]             = useState(0)
   const [attachedFile, setAttachedFile]     = useState<File | null>(null)
   const [isDragging, setIsDragging]         = useState(false)
+  const [errorMsg, setErrorMsg]             = useState<string | null>(null)
   const dragCounter                         = useRef(0)
   const streamRef                           = useRef<HTMLDivElement>(null)
+  const abortRef                            = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (streamRef.current) streamRef.current.scrollTop = streamRef.current.scrollHeight
   }, [tokens])
-
-  useEffect(() => {
-    if (!running) return
-    const interval = setInterval(() => {
-      const isHall = Math.random() < 0.32
-      if (isHall) {
-        const h = HALLUCINATION_POOL[Math.floor(Math.random() * HALLUCINATION_POOL.length)]
-        const ms = Math.floor(Math.random() * 40 + 120)
-        setTokens(prev => [
-          ...prev.slice(-80),
-          { id: uid++, text: h.ctx, kind: 'normal' },
-          { id: uid++, text: '', kind: 'corrected', original: h.bad, corrected: h.good },
-          { id: uid++, text: '. ', kind: 'normal' },
-        ])
-        setCorrections(prev => [
-          { id: uid++, wrong: h.bad, right: h.good, src: h.src, confidence: h.conf, diff: h.diff },
-          ...prev.slice(0, 9),
-        ])
-        setClaimsFound(p => p + 1)
-        setHallucinations(p => p + 1)
-        setAvgVerify(ms)
-        setPipeline(ms + Math.floor(Math.random() * 200 + 150))
-      } else {
-        const pass = PASS_POOL[Math.floor(Math.random() * PASS_POOL.length)]
-        const words = pass.split(' ')
-        const newToks: TokenSpan[] = words.map(w => ({ id: uid++, text: w + ' ', kind: 'normal' }))
-        if (Math.random() < 0.4) newToks[Math.floor(Math.random() * newToks.length)].kind = 'high-entropy'
-        setTokens(prev => [...prev.slice(-80), ...newToks])
-        setClaimsFound(p => p + 1)
-        setVerified(p => p + 1)
-        const lat = Math.floor(Math.random() * 30 + 125)
-        setAvgVerify(lat)
-        setPipeline(lat + Math.floor(Math.random() * 200 + 140))
-      }
-    }, 1800)
-    return () => clearInterval(interval)
-  }, [running])
 
   // ── Drag & drop handlers ──
   const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
@@ -292,15 +240,120 @@ export default function DemoPage() {
     if (file) setAttachedFile(file)
   }, [])
 
-  function handleAnalyse() {
+  async function handleAnalyse() {
+    if (!query.trim()) return
+    // Cancel any ongoing stream
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setTokens([]); setCorrections([])
     setClaimsFound(0); setVerified(0); setHallucinations(0)
+    setAvgVerify(0); setPipeline(0); setErrorMsg(null)
     setRunning(true)
+
+    try {
+      // 1. Upload file to vault first (if attached)
+      if (attachedFile) {
+        const form = new FormData()
+        form.append('file', attachedFile)
+        form.append('source_name', attachedFile.name)
+        const upRes = await fetch(`${BACKEND_URL}/vault/upload`, { method: 'POST', body: form })
+        if (!upRes.ok) {
+          const err = await upRes.json().catch(() => ({ detail: 'Upload failed' }))
+          setErrorMsg(`File upload error: ${err.detail ?? 'Unknown'}`)
+          setRunning(false); return
+        }
+      }
+
+      // 2. Stream from /chat
+      const res = await fetch(`${BACKEND_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+        signal: controller.signal,
+      })
+
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({ detail: 'Backend error' }))
+        setErrorMsg(`Backend error: ${err.detail ?? res.statusText}`)
+        setRunning(false); return
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const { event_type, data } = JSON.parse(line.slice(6))
+
+            if (event_type === 'token') {
+              setTokens(prev => [...prev.slice(-200), { id: uid++, text: data.text, kind: 'normal' }])
+            }
+
+            if (event_type === 'correction') {
+              setTokens(prev => {
+                // Mark the last few tokens that contain the corrected span
+                const updated = [...prev]
+                return [
+                  ...updated,
+                  { id: uid++, text: '', kind: 'corrected', original: data.original_claim, corrected: data.corrected_sentence },
+                ]
+              })
+              setCorrections(prev => [{
+                id: uid++,
+                wrong: data.original_claim,
+                right: data.corrected_sentence,
+                src: data.source ?? 'vault',
+                confidence: data.nli_confidence ?? 0,
+                diff: data.diff_ratio ?? 0,
+              }, ...prev.slice(0, 9)])
+              setHallucinations(p => p + 1)
+            }
+
+            if (event_type === 'stats') {
+              setClaimsFound(data.total_claims_detected ?? 0)
+              setVerified(data.claims_verified ?? 0)
+              setAvgVerify(Math.round(data.avg_verification_latency_ms ?? 0))
+              setPipeline(Math.round(data.total_pipeline_latency_ms ?? 0))
+            }
+
+            if (event_type === 'error') {
+              setErrorMsg(data.message ?? 'Unknown error')
+            }
+
+            if (event_type === 'done') {
+              setClaimsFound(data.total_claims_detected ?? 0)
+              setVerified(data.claims_verified ?? 0)
+              setAvgVerify(Math.round(data.avg_verification_latency_ms ?? 0))
+              setPipeline(Math.round(data.total_pipeline_latency_ms ?? 0))
+            }
+          } catch { /* malformed chunk, skip */ }
+        }
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.name !== 'AbortError') {
+        setErrorMsg(`Connection error: ${e.message}. Is the backend running?`)
+      }
+    } finally {
+      setRunning(false)
+    }
   }
+
   function handleReset() {
+    abortRef.current?.abort()
     setRunning(false); setTokens([]); setCorrections([])
     setClaimsFound(0); setVerified(0); setHallucinations(0)
-    setAvgVerify(143); setPipeline(312)
+    setAvgVerify(0); setPipeline(0); setErrorMsg(null)
   }
 
   const totalFixes = corrections.length
@@ -536,8 +589,13 @@ export default function DemoPage() {
               color: '#94a3b8', fontFamily: 'monospace', overflowY: 'auto',
               minHeight: 160, maxHeight: 200,
             }}>
-              {tokens.length === 0 ? (
-                <span style={{ color: '#334155' }}>Click ▶ Analyse to start the live simulation…</span>
+              {errorMsg && (
+                <div style={{ color: '#ef4444', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 6, padding: '8px 12px', marginBottom: 8, fontSize: '0.75rem' }}>
+                  ⚠️ {errorMsg}
+                </div>
+              )}
+              {tokens.length === 0 && !errorMsg ? (
+                <span style={{ color: '#334155' }}>Click ▶ Analyse to start — responses stream directly from your local Llama 3</span>
               ) : (
                 tokens.map(tok => {
                   if (tok.kind === 'normal') return <span key={tok.id} style={{ color: '#94a3b8' }}>{tok.text}</span>
@@ -614,7 +672,6 @@ export default function DemoPage() {
               { label: 'Verified',       value: verified,       color: '#10b981' },
               { label: 'Hallucinations', value: hallucinations, color: '#ef4444' },
               { label: 'Corrections',    value: totalFixes,     color: '#ef4444' },
-              { label: 'Skipped',        value: 0,              color: '#60a5fa' },
             ].map(r => (
               <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
                 <span style={{ fontSize: '0.68rem', color: '#475569' }}>{r.label}</span>

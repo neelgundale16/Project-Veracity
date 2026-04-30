@@ -1,13 +1,21 @@
 import re
 import time
 import logging
+import os
 import torch
+from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from models import NLIResult
 
 logger = logging.getLogger(__name__)
 
-NLI_MODEL_NAME = "cross-encoder/nli-MiniLM2-L6-H768"
+# ── Model selection ────────────────────────────────────────────────────────
+# If a locally fine-tuned model exists, load it automatically.
+# Otherwise fall back to the original HuggingFace pre-trained model.
+# To deploy your fine-tuned model, just drop it into backend/models/sentinel-finetuned/
+LOCAL_MODEL_PATH   = Path(__file__).parent / "models" / "sentinel-finetuned"
+HF_MODEL_NAME      = "cross-encoder/nli-MiniLM2-L6-H768"
+NLI_MODEL_NAME     = str(LOCAL_MODEL_PATH) if LOCAL_MODEL_PATH.exists() else HF_MODEL_NAME
 CONTRADICTION_THRESHOLD = 0.50
 
 # Patterns that indicate a fact-seeking sentence
@@ -32,7 +40,9 @@ class HaluGateSentinel:
 
     def initialize(self):
         """Load NLI model. Called once at startup."""
-        logger.info(f"Loading NLI model: {NLI_MODEL_NAME}")
+        is_local = LOCAL_MODEL_PATH.exists()
+        source   = "LOCAL fine-tuned" if is_local else "HuggingFace pre-trained"
+        logger.info(f"Loading NLI model: {NLI_MODEL_NAME} [{source}]")
         start = time.perf_counter()
 
         self.tokenizer = AutoTokenizer.from_pretrained(NLI_MODEL_NAME)
@@ -43,7 +53,7 @@ class HaluGateSentinel:
         self._initialized = True
 
         elapsed = (time.perf_counter() - start) * 1000
-        logger.info(f"Sentinel ready | load time: {elapsed:.0f}ms")
+        logger.info(f"Sentinel ready | model={source} | load time: {elapsed:.0f}ms")
         return self
 
     def is_fact_seeking(self, sentence: str) -> bool:

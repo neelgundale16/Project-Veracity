@@ -29,7 +29,8 @@ class Claim(BaseModel):
         "date",
         "policy",
         "statistic",
-        "general"
+        "general",
+        "entropy"                       # ← entropy-flagged uncertain sentence
     ]
     position: int                       # character position in the stream
     sentence: str                       # full sentence containing this claim
@@ -90,7 +91,8 @@ class StreamToken(BaseModel):
         "streaming",                    # still coming in
         "verified",                     # checked, no hallucination
         "corrected",                    # was wrong, now fixed ✓
-        "skipped"                       # non-factual, skipped check
+        "skipped",                      # non-factual, skipped check
+        "high-entropy"                  # ← uncertain token flagged by entropy
     ] = "streaming"
     correction: Optional[str] = None    # the corrected text (if any)
     source: Optional[str] = None        # source PDF that proved the fix

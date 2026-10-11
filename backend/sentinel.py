@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 LOCAL_MODEL_PATH   = Path(__file__).parent / "models" / "sentinel-finetuned"
 HF_MODEL_NAME      = "cross-encoder/nli-MiniLM2-L6-H768"
 NLI_MODEL_NAME     = str(LOCAL_MODEL_PATH) if LOCAL_MODEL_PATH.exists() else HF_MODEL_NAME
-CONTRADICTION_THRESHOLD = 0.50
+
+# Tweak this in your .env file to make the firewall more/less strict
+CONTRADICTION_THRESHOLD = float(os.getenv("CONTRADICTION_THRESHOLD", "0.50"))
 
 # Patterns that indicate a fact-seeking sentence
 FACTUAL_PATTERNS = re.compile(

@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+load_dotenv()
+
 from typing import AsyncGenerator, Optional
 
 from models import ChatRequest, StreamToken, SessionStats
@@ -16,7 +18,6 @@ from sentinel import sentinel
 from rewriter import rewriter
 from interceptor import stream_and_detect
 
-load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"

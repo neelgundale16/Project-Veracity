@@ -19,7 +19,8 @@ VAULT_PATH           = "./vault_db"
 COLLECTION_NAME      = "ground_truth_vault"
 EMBEDDING_MODEL      = "all-MiniLM-L6-v2"
 N_RESULTS            = 3
-SIMILARITY_THRESHOLD = 0.75
+# Tweak this in your .env file to control how strict vault matches must be
+SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.75"))
 UPLOAD_DIR           = "./uploaded_docs"  # ← NEW: PDFs saved here
 
 # Setup logger

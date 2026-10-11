@@ -85,6 +85,8 @@ def compute_shannon_entropy(top_logprobs: list[dict]) -> float:
 # 2. OLLAMA STREAMING WITH LOGPROBS
 # Yields (token_text, entropy) tuples — one per token from the model
 # ─────────────────────────────────────────────────────────────────
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b")
+
 async def _stream_ollama_with_entropy(
     query: str,
 ) -> AsyncGenerator[tuple[str, float], None]:
@@ -96,7 +98,7 @@ async def _stream_ollama_with_entropy(
     API_URL = "http://localhost:11434/v1/chat/completions"
 
     payload = {
-        "model": "llama3",
+        "model":        OLLAMA_MODEL,
         "messages": [
             {
                 "role": "system",

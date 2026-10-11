@@ -114,9 +114,13 @@ class ReverseRewriter:
             # Sentences are about the same topic — return vault version
             return vault_result.matched_text
 
-        # Strategy 3 — Fallback: return vault fact directly
-        logger.debug("Strategy 3 fallback: returning vault matched text")
-        return vault_result.matched_text
+        # Strategy 3 — Fallback: Append inline warning instead of injecting raw PDF blob
+        logger.debug("Strategy 3 fallback: appending inline warning to original text")
+        # Ensure we don't duplicate warnings if the LLM generated multiple sentences
+        warning = " [⚠️ Contradicts Vault]"
+        if warning not in original_sentence:
+            return f"{original_sentence}{warning}"
+        return original_sentence
 
     def build_correction_payload(self, original: str,
                                   corrected: str, source: str) -> dict:

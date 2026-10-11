@@ -22,7 +22,7 @@ interface CorrectionEntry {
 
 const BACKEND_URL = '/api'
 
-const PROVIDERS = ['Ollama (llama3)', 'Gemini', 'OpenAI', 'Claude']
+const PROVIDERS = ['Ollama (qwen2.5)', 'Ollama (llama3)', 'Gemini', 'OpenAI', 'Claude']
 
 let uid = 1
 
